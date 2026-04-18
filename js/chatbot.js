@@ -227,91 +227,61 @@ class Chatbot {
 
     // ── Real-Time Insight Engine (anti-spam, controlled) ─────────────────────
     _startInsightEngine() {
-        // Single controlled interval — 3 second check cycle
-        setTimeout(() => {
-            setInterval(() => this._checkAndInsight(), 3000);
-        }, 8000); // wait 8s after load before first check
+        setInterval(() => {
+            if (!this.simulator) return;
+            const status = this.simulator.getDensityStatus();
+            this.generateSmartInsight(status);
+        }, 3000);
     }
 
-    _checkAndInsight() {
+    generateSmartInsight(status) {
         if (!this.simulator) return;
-
-        // Hard cap on total insights
-        if (this.insightCount >= this.MAX_INSIGHTS) return;
-
-        // Hard throttle — minimum 5s between insights
         const now = Date.now();
-        if (now - this.lastInsightTime < this.MIN_INSIGHT_GAP) return;
+        
+        // 1. Add Throttling (MANDATORY)
+        if (now - this.lastInsightTime < 5000) return;
 
-        let d;
-        try { d = this.getLiveData(); } catch (_) { return; }
+        // 6. Limit total insights (Anti-spam safety)
+        if (this.insightCount > 15) return;
 
-        const { load, congestedNames, status } = d;
-        const curCongestedSig = congestedNames.join(',');
-        const curScenario = status.scenario;
+        const metrics = this.simulator.getZoneMetrics();
+        const entries = Object.entries(metrics).sort((a, b) => a[1] - b[1]);
+        const crowdedZone = entries[entries.length - 1]; // most crowded
+        const safeZone = entries[0]; // safest
 
-        // Priority filter — only alert when load > 50 OR any zone > 60%
-        const hasPriority = load > 50 || congestedNames.length > 0;
-        if (!hasPriority) {
-            // Still update tracking so we notice future changes
-            this.lastLoad = load;
-            this.lastCongestedSig = curCongestedSig;
-            this.lastScenario = curScenario;
+        // 7. Priority filter
+        // Only show insights when: overallLoad > 50 OR any zone density > 60
+        if (status.overallLoad <= 50 && crowdedZone[1] <= 60) {
+            // Still update tracking metrics so we notice future changes
+            this.lastLoad = status.overallLoad;
+            this.lastCongestedSig = crowdedZone[0];
+            this.lastScenario = status.scenario;
             return;
         }
 
-        // Change-based trigger — only fire if something meaningful changed
-        const loadChanged = this.lastLoad !== -1 && Math.abs(load - this.lastLoad) >= 5;
-        const congestChanged = curCongestedSig !== this.lastCongestedSig;
-        const scenarioChanged = curScenario !== this.lastScenario && this.lastScenario !== '';
+        // 3. Change-based trigger (IMPORTANT)
+        const loadChanged = this.lastLoad !== -1 && Math.abs(status.overallLoad - this.lastLoad) >= 5;
+        const congestChanged = crowdedZone[0] !== this.lastCongestedSig;
+        const scenarioChanged = status.scenario !== this.lastScenario && this.lastScenario !== '';
 
-        if (!loadChanged && !congestChanged && !scenarioChanged) {
-            return; // Nothing worth reporting
+        if (this.lastLoad !== -1 && !loadChanged && !congestChanged && !scenarioChanged) {
+            return; // Nothing changed enough to warrant an insight
         }
 
-        // Build insight text
-        const insightText = this._buildInsightText(d);
+        // 4. Smart Insight Function
+        const insight = `AI insight: Zone ${crowdedZone[0]} is congested. Redirect to Zone ${safeZone[0]}.`;
 
-        // Duplicate prevention
-        if (insightText === this.lastInsightText) return;
+        // 2. Duplicate Prevention
+        if (insight === this.lastInsightText) return;
 
-        // All checks passed — inject insight
+        this.lastInsightText = insight;
         this.lastInsightTime = now;
-        this.lastInsightText = insightText;
-        this.lastLoad = load;
-        this.lastCongestedSig = curCongestedSig;
-        this.lastScenario = curScenario;
+        this.lastLoad = status.overallLoad;
+        this.lastCongestedSig = crowdedZone[0];
+        this.lastScenario = status.scenario;
         this.insightCount++;
 
-        this._injectInsight(insightText, d);
-    }
-
-    _buildInsightText(d) {
-        const { load, congestedNames, safestZones, crowdState, status } = d;
-        const scenario = status.scenario;
-
-        if (scenario === 'Evacuation') {
-            return `⚠️ EVAC ACTIVE: Venue in evacuation mode. Clearest corridor: ${safestZones[0]}. All non-essential movement halted.`;
-        }
-        if (crowdState === 'CRITICAL') {
-            return `🔴 CRITICAL: Venue at ${load}% capacity. ${congestedNames.length ? `${congestedNames[0]} is beyond safe limits.` : 'Multiple zones overloaded.'} Redirect immediately to ${safestZones[0]}.`;
-        }
-        if (congestedNames.length > 0) {
-            const templates = [
-                `📡 ${congestedNames[0]} is congested at current load. Routing traffic via ${safestZones[0]} is advised.`,
-                `🔄 Density spike in ${congestedNames[0]}. AI recommends redirecting through ${safestZones[0]}.`,
-                `⚡ ${congestedNames[0]} reaching capacity. Open corridor: ${safestZones[0]}.`,
-            ];
-            return templates[this.insightCount % templates.length];
-        }
-        if (load > 50) {
-            const templates = [
-                `📡 Load at ${load}%. Venue moderately busy. ${safestZones[0]} is your clearest option.`,
-                `🔄 Crowd pressure at ${load}%. ${safestZones[0]} remains open — recommend directing flow there.`,
-            ];
-            return templates[this.insightCount % templates.length];
-        }
-        return `⚡ AI scan: Load ${load}%. ${safestZones[0]} clear. No immediate action needed.`;
+        this._injectInsight(insight);
     }
 
     _injectInsight(text, d) {
@@ -396,7 +366,7 @@ class Chatbot {
         const cleanedText = text.trim();
         if (!cleanedText) return;
 
-        // Save to context memory
+        // Keep system "smart": Maintain last 3 messages context (frontend side)
         this.memory.push(cleanedText);
         if (this.memory.length > 3) this.memory.shift();
 
@@ -404,33 +374,36 @@ class Chatbot {
         this.input.value = '';
         this.busy = true;
 
-        // Dynamic (non-hardcoded) thinking message
+        // Loading indicator
         const thinkMsg = [
-            'Scanning venue telemetry...',
-            'Cross-referencing zone data...',
-            'Analyzing density patterns...',
-            'Querying sensor network...',
-        ][Math.floor(Math.random() * 4)];
+            'Querying Vertex AI...',
+            'Connecting to backend...',
+            'Analyzing context...'
+        ][Math.floor(Math.random() * 3)];
         const typingEl = this.addBotMessage(thinkMsg, true);
 
-        // Variable delay 300–800ms for realism
-        await new Promise(r => setTimeout(r, 300 + Math.random() * 500));
-
         try {
-            if (!this.simulator) throw new Error('Simulator context missing');
+            // Combine the context array into a single string for the request
+            const historyText = this.memory.join('\\n');
 
-            const intent = this.detectIntent(cleanedText);
-            const data = this.getLiveData();
-            const reply = this.buildResponse(intent, cleanedText, data);
+            const response = await fetch('https://3000-cs-1059097624928-default.cs-asia-southeast1-seal.cloudshell.dev/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message: historyText })
+            });
 
-            // Styled debug logging
-            console.log('%c[CrowdAI] User:', 'color:#00f0ff;font-weight:bold', cleanedText);
-            console.log('%c[CrowdAI] Intent:', 'color:#ffb800;font-weight:bold', intent, `| Load: ${data.load}%`);
-            console.log('%c[CrowdAI] Response:', 'color:#00ff66;font-weight:bold', reply);
+            if (!response.ok) {
+                throw new Error(`Backend returned status ${response.status}`);
+            }
 
-            this.lastIntent = intent;
+            const data = await response.json();
+            const reply = data.reply || "No response received.";
+
             this.lastResponse = reply;
 
+            // Remove loading indicator and show actual reply
             typingEl.remove();
             this.addBotMessage(reply);
 
@@ -443,9 +416,9 @@ class Chatbot {
             }
 
         } catch (err) {
-            console.error('[CrowdAI] Error:', err);
+            console.error('[CrowdAI API] Error:', err);
             typingEl.classList.remove('thinking');
-            typingEl.textContent = 'Sensor data unavailable. Please try again.';
+            typingEl.textContent = 'Warning: Vertex AI backend unreachable. Please try again.';
         } finally {
             this.busy = false;
         }
