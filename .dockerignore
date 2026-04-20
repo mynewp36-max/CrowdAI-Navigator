@@ -1,0 +1,11 @@
+.git
+.gitignore
+.dockerignore
+Dockerfile
+node_modules
+npm-debug.log
+.antigravityignore
+brain
+knowledge
+logs
+*.md

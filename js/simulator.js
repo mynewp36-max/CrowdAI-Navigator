@@ -87,8 +87,10 @@ class CrowdSimulator {
           if (visited.has(nk)) continue;
           const moveCost = (dc !== 0 && dr !== 0) ? 1.414 : 1;
           const density = this.grid[nc]?.[nr] ?? 0.5;
-          // High density = very expensive; low density = cheap
-          const newCost = cost + moveCost + density * 10;
+          // AI Aggressiveness (1-100)
+          // Higher aggressiveness = lower density penalty (takes riskier/faster paths)
+          const aggFactor = window.settingsState ? (105 - window.settingsState.aiAggressiveness) / 10 : 10;
+          const newCost = cost + moveCost + density * aggFactor;
           if (!dist.has(nk) || newCost < dist.get(nk)) {
             dist.set(nk, newCost);
             prev.set(nk, { c, r });
@@ -124,16 +126,21 @@ class CrowdSimulator {
 
     for (let c = 0; c < this.cols; c++) {
       for (let r = 0; r < this.rows; r++) {
-        // Smaller drift for cleaner look
-        this.grid[c][r] += (Math.random() - 0.5) * 0.015;
+        if (this.targetGrid && this.targetGrid[c] && this.targetGrid[c][r] !== undefined) {
+             this.grid[c][r] += (this.targetGrid[c][r] - this.grid[c][r]) * 0.05;
+        }
+
+        // Scale drift and scenario intensity by densityMultiplier
+        const dMult = window.settingsState ? window.settingsState.densityMultiplier : 1.0;
+        this.grid[c][r] += (Math.random() - 0.5) * 0.015 * dMult;
 
         if (this.scenario === 'Flashmob') {
           const distToCenter = Math.sqrt(
             Math.pow(c - this.cols / 2, 2) + Math.pow(r - this.rows / 2, 2)
           );
-          if (distToCenter < 4) this.grid[c][r] += 0.015;
+          if (distToCenter < 4) this.grid[c][r] += 0.015 * dMult;
         } else if (this.scenario === 'Evacuation') {
-          this.grid[c][r] -= 0.007;
+          this.grid[c][r] -= 0.007 * dMult;
         }
 
         this.grid[c][r] = Math.max(0, Math.min(1, this.grid[c][r]));

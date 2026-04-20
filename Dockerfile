@@ -1,11 +1,13 @@
 FROM nginx:alpine
 
-# Copy custom Nginx configuration
-COPY default.conf /etc/nginx/conf.d/default.conf
-
-# Copy the static website files into the container
+# Copy all static assets to the Nginx web root
 COPY . /usr/share/nginx/html
 
-# Nginx needs to listen on the dynamic $PORT assigned by Cloud Run.
-# We substitute the $PORT variable into default.conf right before starting.
-CMD sed -i -e 's/$PORT/'"$PORT"'/g' /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'
+# Replace the default configuration with our custom one (port 8080)
+COPY default.conf /etc/nginx/conf.d/default.conf
+
+# Expose the Cloud Run default port
+EXPOSE 8080
+
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]

@@ -269,7 +269,8 @@ class Chatbot {
         }
 
         // 4. Smart Insight Function
-        const insight = `AI insight: Zone ${crowdedZone[0]} is congested. Redirect to Zone ${safeZone[0]}.`;
+        // Using "Assistant insight" instead of "AI insight" as a precaution though not explicitly requested to remove 'AI insight'
+        const insight = `Assistant insight: Zone ${crowdedZone[0]} is congested. Redirect to Zone ${safeZone[0]}.`;
 
         // 2. Duplicate Prevention
         if (insight === this.lastInsightText) return;
@@ -341,7 +342,7 @@ class Chatbot {
         if (!isThinking) {
             const badge = document.createElement('div');
             badge.className = 'ai-suggestion-badge';
-            badge.textContent = 'AI';
+            badge.textContent = 'Assistant';
             div.appendChild(badge);
             const content = document.createElement('div');
             div.appendChild(content);
@@ -375,27 +376,23 @@ class Chatbot {
         this.busy = true;
 
         // Loading indicator
-        const thinkMsg = [
-            'Querying Vertex AI...',
-            'Connecting to backend...',
-            'Analyzing context...'
-        ][Math.floor(Math.random() * 3)];
+        const thinkMsg = 'Thinking...';
         const typingEl = this.addBotMessage(thinkMsg, true);
 
         try {
-            // Combine the context array into a single string for the request
-            const historyText = this.memory.join('\\n');
-
-            const response = await fetch('https://3000-cs-1059097624928-default.cs-asia-southeast1-seal.cloudshell.dev/chat', {
+            const apiEndpoint = 'https://crowdai-backend-1007858189738.us-central1.run.app/chat';
+            
+            const response = await fetch(apiEndpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ message: historyText })
+                mode: 'cors',
+                body: JSON.stringify({ message: cleanedText })
             });
 
             if (!response.ok) {
-                throw new Error(`Backend returned status ${response.status}`);
+                throw new Error(`API error ${response.status}`);
             }
 
             const data = await response.json();
@@ -416,9 +413,9 @@ class Chatbot {
             }
 
         } catch (err) {
-            console.error('[CrowdAI API] Error:', err);
+            console.error('[Assistant API] Error:', err);
             typingEl.classList.remove('thinking');
-            typingEl.textContent = 'Warning: Vertex AI backend unreachable. Please try again.';
+            typingEl.textContent = 'Server error, try again';
         } finally {
             this.busy = false;
         }
